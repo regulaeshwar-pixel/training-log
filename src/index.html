@@ -4,6 +4,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <base href="/training-log/">
     <title>Training Log - Obsidian System</title>
 
     <!-- Fonts -->
@@ -179,32 +180,61 @@
         <!-- NAV -->
         <nav class="bottom-nav">
             <div class="nav-item active" onclick="switchTab('dashboard', this)">
-                <svg class="nav-icon" viewBox="0 0 24 24">
-                    <path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z" />
-                </svg><span>Log</span>
+                <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <!-- Log: Layout Grid -->
+                    <rect width="7" height="7" x="3" y="3" rx="1" />
+                    <rect width="7" height="7" x="14" y="3" rx="1" />
+                    <rect width="7" height="7" x="14" y="14" rx="1" />
+                    <rect width="7" height="7" x="3" y="14" rx="1" />
+                </svg>
+                <span>Log</span>
             </div>
             <div class="nav-item" onclick="switchTab('workout', this)">
-                <svg class="nav-icon" viewBox="0 0 24 24">
-                    <path
-                        d="M20.57 14.86L22 13.43 20.57 12 17 15.57 8.43 7 12 3.43 10.57 2 9.14 3.43 7.71 2 5.57 4.14 4.14 2.71 2.71 4.14l1.43 1.43L2 7.71l1.43 1.43L2 10.57 3.43 12 7 8.43 15.57 17 12 20.57 13.43 22 14.86 20.57 16.29 22 18.43 19.86 19.86 21.29 21.29 19.86l-1.43-1.43L21.29 17l-1.43-1.43L18.43 17l-1.43-1.43L22 10.57l-1.43-1.43L19.14 10.57z" />
-                </svg><span>Train</span>
+                <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <!-- Train: Dumbbell -->
+                    <path d="m6.5 6.5 11 11" />
+                    <path d="m21 21-1-1" />
+                    <path d="m3 3 1 1" />
+                    <path d="m18 22 4-4" />
+                    <path d="m2 6 4-4" />
+                    <path d="m3 10 7-7" />
+                    <path d="m14 21 7-7" />
+                </svg>
+                <span>Train</span>
             </div>
             <div class="nav-item" onclick="switchTab('nutrition', this)">
-                <svg class="nav-icon" viewBox="0 0 24 24">
+                <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <!-- Input: Banana -->
+                    <path d="M4 13c3.5-2 8-2 10 2a5.5 5.5 0 0 1 8 5" />
                     <path
-                        d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z" />
-                </svg><span>Input</span>
+                        d="M5.15 17.89c5.52-1.52 8.65-6.89 7-12C11.55 4 11.5 2 13 2c3.22 0 5 5.5 5 10.5a5.5 5.5 0 0 1-5.5 5.5H5.15" />
+                </svg>
+                <span>Input</span>
             </div>
             <div class="nav-item" onclick="switchTab('alignment', this)">
-                <svg class="nav-icon" viewBox="0 0 24 24">
-                    <path d="M12 2c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2zm9 7h-6v13h-2v-6h-2v6H9V9H3V7h18v2z" />
-                </svg><span>Structure</span>
+                <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <!-- Structure: User/Body -->
+                    <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+                    <circle cx="12" cy="7" r="4" />
+                </svg>
+                <span>Structure</span>
             </div>
             <div class="nav-item" onclick="switchTab('rank', this)">
-                <svg class="nav-icon" viewBox="0 0 24 24">
-                    <path
-                        d="M12 2L1 21h22L12 2zm0 3.99L19.53 19H4.47L12 5.99zM12 15c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z" />
-                </svg><span>Standing</span>
+                <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <!-- Standing: Trophy -->
+                    <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" />
+                    <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18" />
+                    <path d="M4 22h16" />
+                    <path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22" />
+                    <path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22" />
+                    <path d="M18 2H6v7a6 6 0 0 0 12 0V2Z" />
+                </svg>
+                <span>Standing</span>
             </div>
         </nav>
     </div>
