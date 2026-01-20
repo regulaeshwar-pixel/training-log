@@ -247,11 +247,38 @@ function checkLongAbsence(history, refDate) {
     return diffDays >= 14;
 }
 
-// --- 2. Optimized Streak Calculation (O(n)) ---
-function calculateStreak(history) {
+// --- OPTIMIZATION: Cached Date Map ---
+let _dateMapCache = null;
+let _dateMapCacheRef = null;
+let _dateMapCacheLen = -1;
+
+function getDateMap() {
+    // If allData reference and length match cache, return cached map
+    if (_dateMapCache && _dateMapCacheRef === allData && _dateMapCacheLen === allData.length) {
+        return _dateMapCache;
+    }
     const map = new Map();
-    for (const e of history) {
+    for (const e of allData) {
         if (isISODateString(e.date)) map.set(e.date, e);
+    }
+    _dateMapCache = map;
+    _dateMapCacheRef = allData;
+    _dateMapCacheLen = allData.length;
+    return map;
+}
+
+// --- 2. Optimized Streak Calculation (O(n) -> O(1) via Cache) ---
+function calculateStreak(history) {
+    // Use cached map if history is the main dataset (common case)
+    // Otherwise fallback to building map locally (rare case / generic usage)
+    let map;
+    if (history === allData) {
+        map = getDateMap();
+    } else {
+        map = new Map();
+        for (const e of history) {
+            if (isISODateString(e.date)) map.set(e.date, e);
+        }
     }
 
     const anchor = new Date(getLocalISODate());
@@ -514,8 +541,8 @@ function renderApp() {
 
         const dayLabels = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 
-        // OPTIMIZATION: Build map for week rendering
-        const entryMap = new Map(allData.filter(e => isISODateString(e.date)).map(e => [e.date, e]));
+        // OPTIMIZATION: Use cached map instead of rebuilding (O(N) -> O(1))
+        const entryMap = getDateMap();
         UI.weekRow.innerHTML = Array.from({ length: 7 }, (_, i) => {
             const d = new Date(); d.setDate(d.getDate() + dateOffset - (6 - i));
             const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
