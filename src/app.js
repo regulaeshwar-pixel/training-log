@@ -192,11 +192,27 @@ function getLocalISODate() {
     return `${y}-${m}-${day}`;
 }
 
+// --- MEMOIZED VALID HISTORY ---
+let _validHistoryCache = null;
+let _validHistorySource = null;
+let _validHistoryLen = 0;
+
+function getValidHistory(source) {
+    if (_validHistoryCache && _validHistorySource === source && _validHistoryLen === source.length) {
+        return _validHistoryCache;
+    }
+    const valid = source.filter(d => isISODateString(d.date));
+    _validHistoryCache = valid;
+    _validHistorySource = source;
+    _validHistoryLen = source.length;
+    return valid;
+}
+
 // --- 5. Context Calculation fix ---
-function getTimeContext() {
+function getTimeContext(validHistory) {
     let firstDate = new Date();
     // Optimization: Assume allData sorted ascending by date
-    const firstValid = allData.find(e => isISODateString(e.date));
+    const firstValid = validHistory && validHistory.length > 0 ? validHistory[0] : null;
     if (firstValid) {
         firstDate = new Date(firstValid.date);
     }
@@ -209,18 +225,18 @@ function getTimeContext() {
     return { season, chapter, dayInChapter, totalDays: diffDays };
 }
 
-function checkRecoveryDebt(history) {
+function checkRecoveryDebt(validHistory) {
     // Optimization: avoid sort. history is ascending.
-    const valid = history.filter(d => isISODateString(d.date));
-    const last3 = valid.slice(-3).reverse();
+    // validHistory is already filtered for ISO dates
+    const last3 = validHistory.slice(-3).reverse();
     if (last3.length < 3) return false;
     return last3.every(d => !d.sleep_planned);
 }
 
-function checkPartialStreak(history) {
+function checkPartialStreak(validHistory) {
     // Optimization: avoid sort. history is ascending.
-    const valid = history.filter(d => isISODateString(d.date));
-    const pastDays = valid.filter(d => d.date !== todayData.date);
+    // validHistory is already filtered for ISO dates
+    const pastDays = validHistory.filter(d => d.date !== todayData.date);
     let partialCount = 0;
     const len = pastDays.length;
     for (let i = 0; i < 3; i++) {
@@ -231,13 +247,13 @@ function checkPartialStreak(history) {
 }
 
 // --- UPDATED: checkLongAbsence accepts optional reference date (ISO string) ---
-function checkLongAbsence(history, refDate) {
+function checkLongAbsence(validHistory, refDate) {
     // refDate: ISO date string (e.g. entry.date) or undefined => fallback to todayData.date
-    if (history.length < 1) return false;
+    if (validHistory.length < 1) return false;
     // Optimization: avoid sort. history is ascending.
-    const valid = history.filter(d => isISODateString(d.date));
+    // validHistory is already filtered for ISO dates
     const targetDate = refDate || (todayData && todayData.date);
-    const pastEntries = valid.filter(d => d.date !== targetDate);
+    const pastEntries = validHistory.filter(d => d.date !== targetDate);
     if (pastEntries.length === 0) return false;
     // Last entry is the latest one (sorted ascending)
     const lastEntryDate = new Date(pastEntries[pastEntries.length - 1].date);
@@ -295,19 +311,19 @@ function calculateStreak(historyOrMap) {
     return streak;
 }
 
-function totalActiveDays(history) {
-    return history.filter(d => isISODateString(d.date) && (d.daily_xp || 0) > 0).length;
+function totalActiveDays(validHistory) {
+    return validHistory.filter(d => (d.daily_xp || 0) > 0).length;
 }
 
-function calculateDailyXP(entry, history, rankIndex) {
+function calculateDailyXP(entry, validHistory, rankIndex) {
     if (entry.manual) return entry.daily_xp;
     if (!entry) return 0;
 
     const fuelScore = calculateFuelScore(entry);
     if (entry.workout_done && fuelScore < 50) return 5;
-    const isReturning = checkLongAbsence(history, entry.date);
+    const isReturning = checkLongAbsence(validHistory, entry.date);
 
-    if (!isReturning && checkRecoveryDebt(history) && rankIndex >= 4) return 5;
+    if (!isReturning && checkRecoveryDebt(validHistory) && rankIndex >= 4) return 5;
 
     const workout = entry.workout_done ? 1 : 0;
     // Fix: Explicit filter for meals excluding sleep
@@ -318,7 +334,7 @@ function calculateDailyXP(entry, history, rankIndex) {
     const habitPercent = (mealCount + postCount) / totalItems;
     if (workout && habitPercent > 0.75) return 10;
     if (workout || habitPercent > 0.40) {
-        if (checkPartialStreak(history)) return 3;
+        if (checkPartialStreak(validHistory)) return 3;
         return 5;
     }
     return 0;
@@ -332,17 +348,16 @@ function calculateFuelScore(entry) {
     return Math.round((done / posMeals.length) * 100) || 0;
 }
 
-function checkMondayKeeper(history) {
+function checkMondayKeeper(validHistory) {
     let mondaysHit = 0;
-    history.forEach(d => {
-        if (!isISODateString(d.date)) return;
+    validHistory.forEach(d => {
         const date = new Date(d.date);
         if (date.getDay() === 1 && d.daily_xp > 0) mondaysHit++;
     });
     return mondaysHit >= 3;
 }
 
-function analyzeIdentity(history, today, streak) {
+function analyzeIdentity(allData, validHistory, today, streak) {
     const tags = [];
     const fuelScore = calculateFuelScore(today);
 
@@ -356,24 +371,24 @@ function analyzeIdentity(history, today, streak) {
 
     let title = "Novice";
     if (streak >= 3) title = "Consistent";
-    if (checkMondayKeeper(history)) title = "Monday Retention";
+    if (checkMondayKeeper(validHistory)) title = "Monday Retention";
     if (calculateFuelScore(today) >= 85 && streak > 5) title = "Fuel Optimization";
     if (streak >= 14) title = "High Continuity";
 
-    const totalXP = history.reduce((acc, curr) => acc + (curr.daily_xp || 0), 0);
+    const totalXP = allData.reduce((acc, curr) => acc + (curr.daily_xp || 0), 0);
     if (totalXP >= 1000) title = "Integration";
 
     return { tag: activeTag.text, title: title };
 }
 
-function getMomentumState(history) {
+function getMomentumState(validHistory) {
     // Optimization: avoid sort. history is ascending.
-    const valid = history.filter(d => isISODateString(d.date));
+    // validHistory is already filtered for ISO dates
     let perfectStreak = 0;
     let missStreak = 0;
-    const len = valid.length;
+    const len = validHistory.length;
     for (let i = 0; i < 3; i++) {
-        const entry = valid[len - 1 - i];
+        const entry = validHistory[len - 1 - i];
         if (!entry) continue;
         const xp = entry.daily_xp;
         if (xp >= 10) perfectStreak++;
@@ -415,6 +430,7 @@ function renderApp() {
 
     try {
         const dateMap = getDateMap(allData);
+        const validHistory = getValidHistory(allData);
         const todayStr = getLocalISODate();
         todayData = allData.find(d => d.date === todayStr);
         if (!todayData) {
@@ -435,24 +451,24 @@ function renderApp() {
             } else { break; }
         }
 
-        const newXP = calculateDailyXP(todayData, allData, rankIndex);
+        const newXP = calculateDailyXP(todayData, validHistory, rankIndex);
         if (todayData.daily_xp !== newXP) { todayData.daily_xp = newXP; safeStorage.set(allData); }
         const xp = todayData.daily_xp;
 
-        const timeCtx = getTimeContext();
+        const timeCtx = getTimeContext(validHistory);
         UI.timePill.innerText = `S${timeCtx.season} : CH ${timeCtx.chapter}`;
         const chapterName = CHAPTER_NAMES[(timeCtx.chapter - 1) % CHAPTER_NAMES.length] || "Uncharted";
         UI.weeklyTitle.innerText = `CHAPTER ${timeCtx.chapter}: ${chapterName}`;
 
         const fuelScore = calculateFuelScore(todayData);
-        let momentumState = getMomentumState(allData);
-        const isDebt = checkRecoveryDebt(allData);
+        let momentumState = getMomentumState(validHistory);
+        const isDebt = checkRecoveryDebt(validHistory);
         const isElitePlus = rankIndex >= 5;
-        const isReturning = checkLongAbsence(allData, todayData.date);
+        const isReturning = checkLongAbsence(validHistory, todayData.date);
 
         // Fix: True consecutive streak calculation
         const streak = calculateStreak(dateMap);
-        const activeDays = totalActiveDays(allData);
+        const activeDays = totalActiveDays(validHistory);
 
         let dopaScale = 1.15;
         let spring = "cubic-bezier(0.34, 1.56, 0.64, 1)";
@@ -589,7 +605,7 @@ function renderApp() {
             UI.sleepCard.style.borderColor = 'var(--border-subtle)';
         }
 
-        const identity = analyzeIdentity(allData, todayData, streak);
+        const identity = analyzeIdentity(allData, validHistory, todayData, streak);
         UI.tierName.innerText = "CURRENT STANDING: " + currentRank.name;
         UI.userTitle.innerText = identity.title;
         UI.rankStreak.innerText = `${streak} DAY STREAK`;
@@ -755,7 +771,7 @@ window.saveManual = () => {
     }
 
     // compute daily XP using the main function (keeps consistent rules)
-    targetEntry.daily_xp = calculateDailyXP(targetEntry, allData, rankIndexNow);
+    targetEntry.daily_xp = calculateDailyXP(targetEntry, getValidHistory(allData), rankIndexNow);
 
     // now mark as manual (if you still want to flag it)
     targetEntry.manual = true;
