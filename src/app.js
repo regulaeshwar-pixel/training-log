@@ -123,6 +123,22 @@ function isISODateString(s) {
     return typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
 }
 
+function sortAllData() {
+    allData.sort((a, b) => {
+        const isoA = isISODateString(a.date);
+        const isoB = isISODateString(b.date);
+        if (isoA && isoB) {
+            // Optimization: String comparison is valid and faster for YYYY-MM-DD
+            if (a.date < b.date) return -1;
+            if (a.date > b.date) return 1;
+            return 0;
+        }
+        if (isoA) return -1;
+        if (isoB) return 1;
+        return 0;
+    });
+}
+
 function sanitizeData(raw) {
     if (!Array.isArray(raw)) return [];
     const valid = [];
@@ -156,13 +172,8 @@ function mergeImported(newArr) {
     // merge incoming (incoming wins)
     incoming.forEach(e => map.set(e.date, Object.assign({}, map.get(e.date) || {}, e)));
     // produce sorted array with ISO-dates first then manual tail
-    const merged = Array.from(map.values()).sort((a, b) => {
-        if (isISODateString(a.date) && isISODateString(b.date)) return new Date(a.date) - new Date(b.date);
-        if (isISODateString(a.date)) return -1;
-        if (isISODateString(b.date)) return 1;
-        return 0;
-    });
-    allData = merged;
+    allData = Array.from(map.values());
+    sortAllData();
     safeStorage.set(allData);
 }
 
@@ -267,30 +278,71 @@ function getDateMap(source) {
 }
 
 function calculateStreak(historyOrMap) {
-    let map;
+    // Optimization: Iterate backwards on sorted array to avoid expensive Date operations
+    let historyArr;
     if (historyOrMap instanceof Map) {
-        map = historyOrMap;
+        historyArr = Array.from(historyOrMap.values());
+    } else if (Array.isArray(historyOrMap)) {
+        historyArr = historyOrMap;
     } else {
-        map = getDateMap(historyOrMap);
+        return 0;
     }
 
-    const anchor = new Date(getLocalISODate());
+    if (!historyArr || historyArr.length === 0) return 0;
+
+    const todayStr = getLocalISODate();
+    let i = historyArr.length - 1;
+
+    // 1. Skip Manual/Non-ISO entries at the end (Manuals are sorted to the end)
+    while (i >= 0 && !isISODateString(historyArr[i].date)) i--;
+
+    // 2. Skip Future ISO dates
+    while (i >= 0 && historyArr[i].date > todayStr) i--;
+
     let streak = 0;
+    let nextDateTs = Date.parse(todayStr);
 
-    const todayIso = `${anchor.getFullYear()}-${String(anchor.getMonth() + 1).padStart(2, '0')}-${String(anchor.getDate()).padStart(2, '0')}`;
-    const todayEntry = map.get(todayIso);
-    let offset = (todayEntry && todayEntry.daily_xp > 0) ? 0 : 1;
+    // Check if current `i` is Today
+    if (i >= 0 && historyArr[i].date === todayStr) {
+        if ((historyArr[i].daily_xp || 0) > 0) {
+            streak++;
+            nextDateTs -= 86400000;
+        } else {
+            // Today has 0 XP. Streak starts from Yesterday.
+            nextDateTs -= 86400000;
+        }
+        i--; // Consumed today
+    } else {
+        // Today missing. Start searching for Yesterday.
+        nextDateTs -= 86400000;
+    }
 
-    const d = new Date(anchor);
-    d.setDate(d.getDate() - offset);
+    // Iterate backwards for the rest of history
+    while (i >= 0) {
+        const entry = historyArr[i];
 
-    while (true) {
-        const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-        const entry = map.get(iso);
-        if (entry && entry.daily_xp > 0) streak++;
-        else break;
-        if (streak > 3650) break;
-        d.setDate(d.getDate() - 1);
+        // Safety check for ISO format
+        if (!isISODateString(entry.date)) {
+            i--;
+            continue;
+        }
+
+        const entryTs = Date.parse(entry.date);
+        // Fast Diff: 86400000 ms = 1 day
+        const diff = Math.round((nextDateTs - entryTs) / 86400000);
+
+        if (diff === 0) {
+            // Found target date
+            if ((entry.daily_xp || 0) > 0) {
+                streak++;
+                nextDateTs -= 86400000;
+            } else {
+                break; // Streak broken by 0 XP day
+            }
+        } else if (diff > 0) {
+            break; // Gap detected (missing day)
+        }
+        i--;
     }
     return streak;
 }
@@ -420,6 +472,7 @@ function renderApp() {
         if (!todayData) {
             todayData = { date: todayStr, workout_done: false, sleep_planned: false, meals: {}, posture: {}, exercises: {}, daily_xp: 0 };
             allData.push(todayData);
+            sortAllData();
             safeStorage.set(allData);
         }
 
@@ -451,7 +504,7 @@ function renderApp() {
         const isReturning = checkLongAbsence(allData, todayData.date);
 
         // Fix: True consecutive streak calculation
-        const streak = calculateStreak(dateMap);
+        const streak = calculateStreak(allData);
         const activeDays = totalActiveDays(allData);
 
         let dopaScale = 1.15;
@@ -759,6 +812,7 @@ window.saveManual = () => {
 
     // now mark as manual (if you still want to flag it)
     targetEntry.manual = true;
+    sortAllData();
 
     safeStorage.set(allData);
     closeManual();
