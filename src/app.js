@@ -147,6 +147,21 @@ function sanitizeData(raw) {
     return valid.concat(manual);
 }
 
+function sortAllData() {
+    allData.sort((a, b) => {
+        const isIsoA = isISODateString(a.date);
+        const isIsoB = isISODateString(b.date);
+        if (isIsoA && isIsoB) {
+            if (a.date < b.date) return -1;
+            if (a.date > b.date) return 1;
+            return 0;
+        }
+        if (isIsoA) return -1;
+        if (isIsoB) return 1;
+        return 0;
+    });
+}
+
 // --- Helper: Merge Imported Data ---
 function mergeImported(newArr) {
     const incoming = sanitizeData(newArr);
@@ -155,14 +170,9 @@ function mergeImported(newArr) {
     allData.forEach(e => map.set(e.date, Object.assign({}, map.get(e.date) || {}, e)));
     // merge incoming (incoming wins)
     incoming.forEach(e => map.set(e.date, Object.assign({}, map.get(e.date) || {}, e)));
-    // produce sorted array with ISO-dates first then manual tail
-    const merged = Array.from(map.values()).sort((a, b) => {
-        if (isISODateString(a.date) && isISODateString(b.date)) return new Date(a.date) - new Date(b.date);
-        if (isISODateString(a.date)) return -1;
-        if (isISODateString(b.date)) return 1;
-        return 0;
-    });
-    allData = merged;
+
+    allData = Array.from(map.values());
+    sortAllData();
     safeStorage.set(allData);
 }
 
@@ -267,6 +277,53 @@ function getDateMap(source) {
 }
 
 function calculateStreak(historyOrMap) {
+    // OPTIMIZATION: Use Array if provided (O(N) vs O(Streak*Cost))
+    if (Array.isArray(historyOrMap)) {
+        const anchorStr = getLocalISODate();
+        // Fast forward to anchor or before
+        let index = historyOrMap.length - 1;
+        while (index >= 0) {
+            if (historyOrMap[index].date <= anchorStr) break;
+            index--;
+        }
+
+        let streak = 0;
+        let lastTime = Date.parse(anchorStr);
+        let processedTime = null;
+
+        while (index >= 0) {
+            const entry = historyOrMap[index];
+            if (!isISODateString(entry.date)) { index--; continue; }
+
+            const time = Date.parse(entry.date);
+            if (time === processedTime) { index--; continue; } // Skip earlier duplicates
+            processedTime = time;
+
+            const diff = lastTime - time;
+            if (diff === 0) {
+                // Today
+                if (entry.daily_xp > 0) {
+                    streak++;
+                    lastTime = time; // Mark as connected
+                }
+                // If 0, we don't increment, but lastTime stays at "Today" so we can connect to Yesterday
+            } else if (diff === 86400000) {
+                // Consecutive day
+                if (entry.daily_xp > 0) {
+                    streak++;
+                    lastTime = time;
+                } else {
+                    break;
+                }
+            } else {
+                // Gap
+                break;
+            }
+            index--;
+        }
+        return streak;
+    }
+
     let map;
     if (historyOrMap instanceof Map) {
         map = historyOrMap;
@@ -451,7 +508,7 @@ function renderApp() {
         const isReturning = checkLongAbsence(allData, todayData.date);
 
         // Fix: True consecutive streak calculation
-        const streak = calculateStreak(dateMap);
+        const streak = calculateStreak(allData);
         const activeDays = totalActiveDays(allData);
 
         let dopaScale = 1.15;
@@ -695,6 +752,7 @@ window.addTestXP = () => {
     entry.workout_done = true;
     // cap so you don't overflow unrealistic XP
     entry.daily_xp = Math.min(100, (entry.daily_xp || 0) + 50);
+    sortAllData();
     safeStorage.set(allData);
     renderApp();
 };
@@ -760,6 +818,7 @@ window.saveManual = () => {
     // now mark as manual (if you still want to flag it)
     targetEntry.manual = true;
 
+    sortAllData();
     safeStorage.set(allData);
     closeManual();
     renderApp();
@@ -857,4 +916,5 @@ UI.navItems.forEach(n => {
 // load undo stack (session) and initial data
 loadUndo();
 allData = sanitizeData(safeStorage.get());
+sortAllData();
 renderApp();
