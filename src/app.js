@@ -267,12 +267,75 @@ function getDateMap(source) {
 }
 
 function calculateStreak(historyOrMap) {
-    let map;
-    if (historyOrMap instanceof Map) {
-        map = historyOrMap;
-    } else {
-        map = getDateMap(historyOrMap);
+    // OPTIMIZED: Use array source directly if available to avoid Date creation loop (O(n) scan instead of O(streak) Date ops).
+    // NOTE: This optimization relies on the history array being sorted by date (ascending), which is guaranteed by sanitizeData.
+    let source = null;
+    if (Array.isArray(historyOrMap)) {
+        source = historyOrMap;
     }
+
+    if (source) {
+        const anchorStr = getLocalISODate();
+        const anchorTs = Date.parse(anchorStr);
+        let streak = 0;
+        let nextExpectedTs = anchorTs;
+        let foundStart = false;
+
+        // Iterate backwards through sorted history
+        for (let i = source.length - 1; i >= 0; i--) {
+            const entry = source[i];
+            if (!isISODateString(entry.date)) continue;
+
+            const entryTs = Date.parse(entry.date);
+
+            if (!foundStart) {
+                if (entryTs > anchorTs) continue; // Skip future dates
+
+                if (entryTs === anchorTs) {
+                    if ((entry.daily_xp || 0) > 0) {
+                        streak = 1;
+                        nextExpectedTs = anchorTs - 86400000;
+                        foundStart = true;
+                    } else {
+                        // Today exists but 0 XP. Start counting from Yesterday.
+                        nextExpectedTs = anchorTs - 86400000;
+                    }
+                } else {
+                    // We are past Today (entryTs < anchorTs).
+                    // Check if this is Yesterday.
+                    if (entryTs === anchorTs - 86400000) {
+                        if ((entry.daily_xp || 0) > 0) {
+                            streak = 1;
+                            nextExpectedTs = anchorTs - 172800000;
+                            foundStart = true;
+                        } else {
+                            return 0; // Yesterday has 0 XP
+                        }
+                    } else {
+                        return 0; // Gap > 1 day (neither Today nor Yesterday valid start)
+                    }
+                }
+            } else {
+                // In streak counting mode
+                if (entryTs === nextExpectedTs) {
+                    if ((entry.daily_xp || 0) > 0) {
+                        streak++;
+                        nextExpectedTs -= 86400000;
+                    } else {
+                        break; // 0 XP breaks streak
+                    }
+                } else if (entryTs < nextExpectedTs) {
+                    break; // Date gap breaks streak
+                }
+            }
+            if (streak > 3650) break; // Safety cap
+        }
+        return streak;
+    }
+
+    // Fallback to Map logic (should rarely be hit if allData is passed)
+    let map = historyOrMap;
+    if (!(map instanceof Map)) map = getDateMap(historyOrMap);
 
     const anchor = new Date(getLocalISODate());
     let streak = 0;
@@ -451,7 +514,7 @@ function renderApp() {
         const isReturning = checkLongAbsence(allData, todayData.date);
 
         // Fix: True consecutive streak calculation
-        const streak = calculateStreak(dateMap);
+        const streak = calculateStreak(allData);
         const activeDays = totalActiveDays(allData);
 
         let dopaScale = 1.15;
