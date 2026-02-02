@@ -267,6 +267,65 @@ function getDateMap(source) {
 }
 
 function calculateStreak(historyOrMap) {
+    // Optimization: Use array for O(N) scan without Date object creation overhead
+    if (Array.isArray(historyOrMap)) {
+        const history = historyOrMap;
+        const todayStr = getLocalISODate();
+        const oneDay = 86400000;
+
+        let idx = history.length - 1;
+        // Skip manual/invalid entries at the tail
+        while (idx >= 0 && !isISODateString(history[idx].date)) idx--;
+
+        // Find today's entry or sync to date
+        let todayEntry = null;
+        while (idx >= 0) {
+            const entry = history[idx];
+            if (entry.date > todayStr) { idx--; continue; }
+            if (entry.date === todayStr) { todayEntry = entry; break; }
+            if (entry.date < todayStr) break; // today missing
+        }
+
+        let streak = 0;
+        // Parse strictly as YYYY-MM-DD UTC for integer math consistency
+        let checkDateMs = Date.parse(todayStr);
+
+        // Determine if we start counting from today or yesterday
+        if (todayEntry && (todayEntry.daily_xp || 0) > 0) {
+            streak++;
+            checkDateMs -= oneDay;
+            // If we used this entry, ensure we check previous next
+            if (idx >= 0 && history[idx] === todayEntry) idx--;
+        } else {
+            // Check yesterday
+            checkDateMs -= oneDay;
+            // If todayEntry exists but 0 XP, we ignore it.
+            if (todayEntry && idx >= 0 && history[idx] === todayEntry) idx--;
+        }
+
+        while (idx >= 0 && streak < 3650) {
+            const entry = history[idx];
+            // Skip manual entries if they appear mixed
+            if (!isISODateString(entry.date)) { idx--; continue; }
+
+            const entryMs = Date.parse(entry.date);
+
+            if (entryMs === checkDateMs) {
+                if ((entry.daily_xp || 0) > 0) {
+                    streak++;
+                    checkDateMs -= oneDay;
+                } else {
+                    break; // Streak broken
+                }
+            } else if (entryMs < checkDateMs) {
+                break; // Gap detected
+            }
+            // If entryMs > checkDateMs (duplicate or future), ignore
+            idx--;
+        }
+        return streak;
+    }
+
     let map;
     if (historyOrMap instanceof Map) {
         map = historyOrMap;
@@ -451,7 +510,7 @@ function renderApp() {
         const isReturning = checkLongAbsence(allData, todayData.date);
 
         // Fix: True consecutive streak calculation
-        const streak = calculateStreak(dateMap);
+        const streak = calculateStreak(allData);
         const activeDays = totalActiveDays(allData);
 
         let dopaScale = 1.15;
