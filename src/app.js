@@ -252,6 +252,23 @@ let _dateMapCache = null;
 let _dateMapSource = null;
 let _dateMapLen = 0;
 
+let _validHistoryCache = null;
+let _validHistorySource = null;
+let _validHistoryLen = 0;
+
+function getValidHistory(source) {
+    if (_validHistoryCache && _validHistorySource === source && _validHistoryLen === source.length) {
+        return _validHistoryCache;
+    }
+    // Ensure valid history is always sorted for the optimization
+    const valid = source.filter(d => isISODateString(d.date))
+                        .sort((a, b) => new Date(a.date) - new Date(b.date));
+    _validHistoryCache = valid;
+    _validHistorySource = source;
+    _validHistoryLen = source.length;
+    return valid;
+}
+
 function getDateMap(source) {
     if (_dateMapCache && _dateMapSource === source && _dateMapLen === source.length) {
         return _dateMapCache;
@@ -267,6 +284,50 @@ function getDateMap(source) {
 }
 
 function calculateStreak(historyOrMap) {
+    // Optimization: Array iteration avoids Date string formatting overhead in loop
+    if (Array.isArray(historyOrMap)) {
+        const valid = getValidHistory(historyOrMap);
+        if (valid.length === 0) return 0;
+
+        const anchor = new Date(getLocalISODate());
+        const anchorIso = `${anchor.getFullYear()}-${String(anchor.getMonth() + 1).padStart(2, '0')}-${String(anchor.getDate()).padStart(2, '0')}`;
+
+        let idx = valid.length - 1;
+        // Find latest entry <= anchorIso (handle future dates if any)
+        while (idx >= 0 && valid[idx].date > anchorIso) idx--;
+
+        if (idx >= 0) {
+            let streak = 0;
+            let current = valid[idx];
+            let startIdx = idx;
+
+            if (current.date === anchorIso) {
+                if ((current.daily_xp || 0) <= 0) startIdx--;
+            } else {
+                // Check if yesterday
+                const yest = new Date(anchor);
+                yest.setDate(yest.getDate() - 1);
+                const yIso = `${yest.getFullYear()}-${String(yest.getMonth() + 1).padStart(2, '0')}-${String(yest.getDate()).padStart(2, '0')}`;
+                if (current.date !== yIso) return 0;
+            }
+
+            let lastTime = null;
+            for (let i = startIdx; i >= 0; i--) {
+                const e = valid[i];
+                if ((e.daily_xp || 0) <= 0) break;
+
+                const t = Date.parse(e.date);
+                if (lastTime !== null && (lastTime - t !== 86400000)) break;
+
+                streak++;
+                lastTime = t;
+                if (streak > 3650) break;
+            }
+            return streak;
+        }
+        return 0;
+    }
+
     let map;
     if (historyOrMap instanceof Map) {
         map = historyOrMap;
@@ -451,7 +512,7 @@ function renderApp() {
         const isReturning = checkLongAbsence(allData, todayData.date);
 
         // Fix: True consecutive streak calculation
-        const streak = calculateStreak(dateMap);
+        const streak = calculateStreak(allData);
         const activeDays = totalActiveDays(allData);
 
         let dopaScale = 1.15;
@@ -759,6 +820,9 @@ window.saveManual = () => {
 
     // now mark as manual (if you still want to flag it)
     targetEntry.manual = true;
+
+    // Fix: Enforce sort order to support optimized streak calculation
+    allData = sanitizeData(allData);
 
     safeStorage.set(allData);
     closeManual();
