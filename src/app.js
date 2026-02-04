@@ -210,17 +210,15 @@ function getTimeContext() {
 }
 
 function checkRecoveryDebt(history) {
-    // Optimization: avoid sort. history is ascending.
-    const valid = history.filter(d => isISODateString(d.date));
-    const last3 = valid.slice(-3).reverse();
+    // Optimization: history is already valid
+    const last3 = history.slice(-3).reverse();
     if (last3.length < 3) return false;
     return last3.every(d => !d.sleep_planned);
 }
 
 function checkPartialStreak(history) {
-    // Optimization: avoid sort. history is ascending.
-    const valid = history.filter(d => isISODateString(d.date));
-    const pastDays = valid.filter(d => d.date !== todayData.date);
+    // Optimization: history is already valid
+    const pastDays = history.filter(d => d.date !== todayData.date);
     let partialCount = 0;
     const len = pastDays.length;
     for (let i = 0; i < 3; i++) {
@@ -234,10 +232,9 @@ function checkPartialStreak(history) {
 function checkLongAbsence(history, refDate) {
     // refDate: ISO date string (e.g. entry.date) or undefined => fallback to todayData.date
     if (history.length < 1) return false;
-    // Optimization: avoid sort. history is ascending.
-    const valid = history.filter(d => isISODateString(d.date));
+    // Optimization: history is already valid (passed from getValidHistory)
     const targetDate = refDate || (todayData && todayData.date);
-    const pastEntries = valid.filter(d => d.date !== targetDate);
+    const pastEntries = history.filter(d => d.date !== targetDate);
     if (pastEntries.length === 0) return false;
     // Last entry is the latest one (sorted ascending)
     const lastEntryDate = new Date(pastEntries[pastEntries.length - 1].date);
@@ -264,6 +261,21 @@ function getDateMap(source) {
     _dateMapSource = source;
     _dateMapLen = source.length;
     return map;
+}
+
+let _validHistoryCache = null;
+let _validHistorySource = null;
+let _validHistoryLen = 0;
+
+function getValidHistory(source) {
+    if (_validHistoryCache && _validHistorySource === source && _validHistoryLen === source.length) {
+        return _validHistoryCache;
+    }
+    const valid = source.filter(d => isISODateString(d.date));
+    _validHistoryCache = valid;
+    _validHistorySource = source;
+    _validHistoryLen = source.length;
+    return valid;
 }
 
 function calculateStreak(historyOrMap) {
@@ -296,7 +308,7 @@ function calculateStreak(historyOrMap) {
 }
 
 function totalActiveDays(history) {
-    return history.filter(d => isISODateString(d.date) && (d.daily_xp || 0) > 0).length;
+    return history.filter(d => (d.daily_xp || 0) > 0).length;
 }
 
 function calculateDailyXP(entry, history, rankIndex) {
@@ -335,14 +347,13 @@ function calculateFuelScore(entry) {
 function checkMondayKeeper(history) {
     let mondaysHit = 0;
     history.forEach(d => {
-        if (!isISODateString(d.date)) return;
         const date = new Date(d.date);
         if (date.getDay() === 1 && d.daily_xp > 0) mondaysHit++;
     });
     return mondaysHit >= 3;
 }
 
-function analyzeIdentity(history, today, streak) {
+function analyzeIdentity(history, today, streak, totalXP) {
     const tags = [];
     const fuelScore = calculateFuelScore(today);
 
@@ -360,20 +371,18 @@ function analyzeIdentity(history, today, streak) {
     if (calculateFuelScore(today) >= 85 && streak > 5) title = "Fuel Optimization";
     if (streak >= 14) title = "High Continuity";
 
-    const totalXP = history.reduce((acc, curr) => acc + (curr.daily_xp || 0), 0);
     if (totalXP >= 1000) title = "Integration";
 
     return { tag: activeTag.text, title: title };
 }
 
 function getMomentumState(history) {
-    // Optimization: avoid sort. history is ascending.
-    const valid = history.filter(d => isISODateString(d.date));
+    // Optimization: history is already valid
     let perfectStreak = 0;
     let missStreak = 0;
-    const len = valid.length;
+    const len = history.length;
     for (let i = 0; i < 3; i++) {
-        const entry = valid[len - 1 - i];
+        const entry = history[len - 1 - i];
         if (!entry) continue;
         const xp = entry.daily_xp;
         if (xp >= 10) perfectStreak++;
@@ -435,7 +444,10 @@ function renderApp() {
             } else { break; }
         }
 
-        const newXP = calculateDailyXP(todayData, allData, rankIndex);
+        // Optimization: Get valid history once
+        const validHistory = getValidHistory(allData);
+
+        const newXP = calculateDailyXP(todayData, validHistory, rankIndex);
         if (todayData.daily_xp !== newXP) { todayData.daily_xp = newXP; safeStorage.set(allData); }
         const xp = todayData.daily_xp;
 
@@ -445,14 +457,14 @@ function renderApp() {
         UI.weeklyTitle.innerText = `CHAPTER ${timeCtx.chapter}: ${chapterName}`;
 
         const fuelScore = calculateFuelScore(todayData);
-        let momentumState = getMomentumState(allData);
-        const isDebt = checkRecoveryDebt(allData);
+        let momentumState = getMomentumState(validHistory);
+        const isDebt = checkRecoveryDebt(validHistory);
         const isElitePlus = rankIndex >= 5;
-        const isReturning = checkLongAbsence(allData, todayData.date);
+        const isReturning = checkLongAbsence(validHistory, todayData.date);
 
         // Fix: True consecutive streak calculation
         const streak = calculateStreak(dateMap);
-        const activeDays = totalActiveDays(allData);
+        const activeDays = totalActiveDays(validHistory);
 
         let dopaScale = 1.15;
         let spring = "cubic-bezier(0.34, 1.56, 0.64, 1)";
@@ -589,7 +601,7 @@ function renderApp() {
             UI.sleepCard.style.borderColor = 'var(--border-subtle)';
         }
 
-        const identity = analyzeIdentity(allData, todayData, streak);
+        const identity = analyzeIdentity(validHistory, todayData, streak, totalXP);
         UI.tierName.innerText = "CURRENT STANDING: " + currentRank.name;
         UI.userTitle.innerText = identity.title;
         UI.rankStreak.innerText = `${streak} DAY STREAK`;
@@ -755,7 +767,7 @@ window.saveManual = () => {
     }
 
     // compute daily XP using the main function (keeps consistent rules)
-    targetEntry.daily_xp = calculateDailyXP(targetEntry, allData, rankIndexNow);
+    targetEntry.daily_xp = calculateDailyXP(targetEntry, getValidHistory(allData), rankIndexNow);
 
     // now mark as manual (if you still want to flag it)
     targetEntry.manual = true;
