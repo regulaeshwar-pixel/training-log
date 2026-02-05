@@ -196,7 +196,8 @@ function getLocalISODate() {
 function getTimeContext() {
     let firstDate = new Date();
     // Optimization: Assume allData sorted ascending by date
-    const firstValid = allData.find(e => isISODateString(e.date));
+    const valid = getValidHistory(allData);
+    const firstValid = valid[0];
     if (firstValid) {
         firstDate = new Date(firstValid.date);
     }
@@ -211,7 +212,7 @@ function getTimeContext() {
 
 function checkRecoveryDebt(history) {
     // Optimization: avoid sort. history is ascending.
-    const valid = history.filter(d => isISODateString(d.date));
+    const valid = getValidHistory(history);
     const last3 = valid.slice(-3).reverse();
     if (last3.length < 3) return false;
     return last3.every(d => !d.sleep_planned);
@@ -219,7 +220,7 @@ function checkRecoveryDebt(history) {
 
 function checkPartialStreak(history) {
     // Optimization: avoid sort. history is ascending.
-    const valid = history.filter(d => isISODateString(d.date));
+    const valid = getValidHistory(history);
     const pastDays = valid.filter(d => d.date !== todayData.date);
     let partialCount = 0;
     const len = pastDays.length;
@@ -235,7 +236,7 @@ function checkLongAbsence(history, refDate) {
     // refDate: ISO date string (e.g. entry.date) or undefined => fallback to todayData.date
     if (history.length < 1) return false;
     // Optimization: avoid sort. history is ascending.
-    const valid = history.filter(d => isISODateString(d.date));
+    const valid = getValidHistory(history);
     const targetDate = refDate || (todayData && todayData.date);
     const pastEntries = valid.filter(d => d.date !== targetDate);
     if (pastEntries.length === 0) return false;
@@ -252,6 +253,21 @@ let _dateMapCache = null;
 let _dateMapSource = null;
 let _dateMapLen = 0;
 
+let _validHistCache = null;
+let _validHistSource = null;
+let _validHistLen = 0;
+
+function getValidHistory(source) {
+    if (_validHistCache && _validHistSource === source && _validHistLen === source.length) {
+        return _validHistCache;
+    }
+    const valid = source.filter(d => isISODateString(d.date));
+    _validHistCache = valid;
+    _validHistSource = source;
+    _validHistLen = source.length;
+    return valid;
+}
+
 function getDateMap(source) {
     if (_dateMapCache && _dateMapSource === source && _dateMapLen === source.length) {
         return _dateMapCache;
@@ -267,6 +283,73 @@ function getDateMap(source) {
 }
 
 function calculateStreak(historyOrMap) {
+    if (Array.isArray(historyOrMap)) {
+        const valid = getValidHistory(historyOrMap);
+        if (!valid.length) return 0;
+
+        const todayStr = getLocalISODate();
+        // Use exact Ms to avoid DST issues with simple subtraction?
+        // UTC YYYY-MM-DD is safe for 24h subtraction
+        const oneDayMs = 86400000;
+        let currentTargetMs = Date.parse(todayStr);
+        let streak = 0;
+
+        // Find start index (valid is sorted ascending)
+        let i = valid.length - 1;
+        while (i >= 0 && valid[i].date > todayStr) i--;
+
+        // Check Today
+        if (i >= 0 && valid[i].date === todayStr) {
+            if ((valid[i].daily_xp || 0) > 0) {
+                streak++;
+                currentTargetMs -= oneDayMs;
+            } else {
+                // Today recorded but 0 XP. Allow missing today.
+            }
+            // Move past today regardless (we handled it or decided to skip it)
+            i--;
+        } else {
+            // Today missing. Allow missing today.
+        }
+
+        // If we didn't count today, we are still looking for yesterday (currentTargetMs is today).
+        // Wait, if we allow missing today, we should decrement currentTargetMs to yesterday.
+        if (streak === 0) {
+             // Check if we already decremented?
+             // If we counted today, streak=1, currentTargetMs = yesterday.
+             // If we didn't count today, streak=0, currentTargetMs = today.
+             // We need to start looking from yesterday.
+             currentTargetMs -= oneDayMs;
+        }
+
+        // Iterate backwards
+        while (i >= 0 && streak < 3650) {
+            const entry = valid[i];
+            // Date.parse is fast enough here compared to new Date() loop?
+            // Yes, but we can optimize further by caching entryMs if needed.
+            // But loop is simple.
+            const entryMs = Date.parse(entry.date);
+
+            if (entryMs > currentTargetMs) {
+                i--; continue; // Should not happen given sort, but safe
+            }
+
+            if (entryMs === currentTargetMs) {
+                if ((entry.daily_xp || 0) > 0) {
+                    streak++;
+                    currentTargetMs -= oneDayMs;
+                } else {
+                    break; // Streak broken by 0 XP day
+                }
+                i--;
+            } else {
+                // entryMs < currentTargetMs implies gap
+                break;
+            }
+        }
+        return streak;
+    }
+
     let map;
     if (historyOrMap instanceof Map) {
         map = historyOrMap;
@@ -296,7 +379,8 @@ function calculateStreak(historyOrMap) {
 }
 
 function totalActiveDays(history) {
-    return history.filter(d => isISODateString(d.date) && (d.daily_xp || 0) > 0).length;
+    const valid = getValidHistory(history);
+    return valid.filter(d => (d.daily_xp || 0) > 0).length;
 }
 
 function calculateDailyXP(entry, history, rankIndex) {
@@ -334,8 +418,8 @@ function calculateFuelScore(entry) {
 
 function checkMondayKeeper(history) {
     let mondaysHit = 0;
-    history.forEach(d => {
-        if (!isISODateString(d.date)) return;
+    const valid = getValidHistory(history);
+    valid.forEach(d => {
         const date = new Date(d.date);
         if (date.getDay() === 1 && d.daily_xp > 0) mondaysHit++;
     });
@@ -368,7 +452,7 @@ function analyzeIdentity(history, today, streak) {
 
 function getMomentumState(history) {
     // Optimization: avoid sort. history is ascending.
-    const valid = history.filter(d => isISODateString(d.date));
+    const valid = getValidHistory(history);
     let perfectStreak = 0;
     let missStreak = 0;
     const len = valid.length;
@@ -451,7 +535,7 @@ function renderApp() {
         const isReturning = checkLongAbsence(allData, todayData.date);
 
         // Fix: True consecutive streak calculation
-        const streak = calculateStreak(dateMap);
+        const streak = calculateStreak(allData);
         const activeDays = totalActiveDays(allData);
 
         let dopaScale = 1.15;
