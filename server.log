@@ -1,0 +1,5 @@
+127.0.0.1 - - [05/Feb/2026 16:32:01] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [05/Feb/2026 16:32:01] code 404, message File not found
+127.0.0.1 - - [05/Feb/2026 16:32:01] "GET /training-log/styles.css HTTP/1.1" 404 -
+127.0.0.1 - - [05/Feb/2026 16:32:01] code 404, message File not found
+127.0.0.1 - - [05/Feb/2026 16:32:01] "GET /training-log/app.js HTTP/1.1" 404 -
